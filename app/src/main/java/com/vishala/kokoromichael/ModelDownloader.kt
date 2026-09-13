@@ -10,17 +10,13 @@ object ModelDownloader {
         val voiceFile: File
     )
 
-    private const val MODEL_ASSET =
-        "kokoro/kokoro.onnx"
+    private const val MODEL_ASSET = "kokoro/kokoro.onnx"
+    private const val VOICE_ASSET = "kokoro/am_michael.bin"
+    private const val LEXICON_ASSET = "kokoro/kokoro-g2p.tab"
 
-    private const val VOICE_ASSET =
-        "kokoro/am_michael.bin"
-
-    private const val MODEL_NAME =
-        "kokoro.onnx"
-
-    private const val VOICE_NAME =
-        "am_michael.bin"
+    private const val MODEL_NAME = "kokoro.onnx"
+    private const val VOICE_NAME = "am_michael.bin"
+    private const val LEXICON_NAME = "kokoro-g2p.tab"
 
     @Synchronized
     fun prepare(context: Context): ModelFiles {
@@ -44,6 +40,11 @@ object ModelDownloader {
             VOICE_NAME
         )
 
+        val lexiconFile = File(
+            modelDir,
+            LEXICON_NAME
+        )
+
         copyAssetIfNeeded(
             context,
             MODEL_ASSET,
@@ -56,15 +57,33 @@ object ModelDownloader {
             voiceFile
         )
 
-        if (!modelFile.exists() || modelFile.length() == 0L) {
+        copyAssetIfNeeded(
+            context,
+            LEXICON_ASSET,
+            lexiconFile
+        )
+
+        if (!modelFile.exists() ||
+            modelFile.length() == 0L
+        ) {
             throw IllegalStateException(
                 "Kokoro model file is missing"
             )
         }
 
-        if (!voiceFile.exists() || voiceFile.length() == 0L) {
+        if (!voiceFile.exists() ||
+            voiceFile.length() == 0L
+        ) {
             throw IllegalStateException(
                 "Michael voice file is missing"
+            )
+        }
+
+        if (!lexiconFile.exists() ||
+            lexiconFile.length() == 0L
+        ) {
+            throw IllegalStateException(
+                "Kokoro G2P lexicon is missing"
             )
         }
 
@@ -79,19 +98,28 @@ object ModelDownloader {
         assetPath: String,
         destination: File
     ) {
-        if (destination.exists() && destination.length() > 0L) {
+        if (
+            destination.exists() &&
+            destination.length() > 0L
+        ) {
             return
         }
 
         destination.parentFile?.mkdirs()
 
-        context.assets.open(assetPath).use { input ->
-            destination.outputStream().use { output ->
-                input.copyTo(
-                    output,
-                    DEFAULT_BUFFER_SIZE
-                )
+        context.assets
+            .open(assetPath)
+            .use { input ->
+
+                destination
+                    .outputStream()
+                    .use { output ->
+
+                        input.copyTo(
+                            output,
+                            DEFAULT_BUFFER_SIZE
+                        )
+                    }
             }
-        }
     }
 }
