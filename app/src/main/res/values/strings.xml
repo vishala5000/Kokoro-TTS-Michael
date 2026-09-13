@@ -1,1 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
 
+<resources>
+
+    <string name="app_name">
+        Kokoro TTS Michael
+    </string>
+
+    <string name="offline_info">
+        Fully Offline • Kokoro 82M INT8 • American English
+    </string>
+
+    <string name="text_hint">
+        Enter or paste unlimited English text here...
+    </string>
+
+    <string name="voice_label">
+        Voice
+    </string>
+
+    <string name="michael_voice">
+        Michael • am_michael • American Male
+    </string>
+
+    <string name="speed_slow">
+        0.50x
+    </string>
+
+    <string name="speed_fast">
+        2.00x
+    </string>
+
+    <string name="start">
+        START
+    </string>
+
+    <string name="stop">
+        STOP
+    </string>
+
+    <string name="status_ready">
+        Ready • No Internet required
+    </string>
+
+    <string name="status_preparing">
+        Preparing offline Kokoro files...
+    </string>
+
+    <string name="status_loading_model">
+        Loading Kokoro model...
+    </string>
+
+    <string name="status_generating">
+        Generating Michael voice...
+    </string>
+
+    <string name="status_stopping">
+        Stopping after the current section...
+    </string>
+
+    <string name="status_complete">
+        Complete • Saved to Music/audio.wav
+    </string>
+
+    <string name="status_stopped">
+        Stopped • Completed audio saved to Music/audio.wav
+    </string>
+
+    <string name="enter_text_first">
+        Enter some text first.
+    </string>
+
+    <string name="audio_saved">
+        Audio saved to Music/audio.wav
+    </string>
+
+</resources>
