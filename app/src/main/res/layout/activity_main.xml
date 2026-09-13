@@ -133,6 +133,15 @@
 
         </LinearLayout>
 
+        <Button
+            android:id="@+id/saveWavButton"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:layout_marginTop="14dp"
+            android:text="Save WAV"
+            android:textSize="17sp"
+            android:enabled="false" />
+
         <ProgressBar
             android:id="@+id/progressBar"
             style="?android:attr/progressBarStyleHorizontal"
