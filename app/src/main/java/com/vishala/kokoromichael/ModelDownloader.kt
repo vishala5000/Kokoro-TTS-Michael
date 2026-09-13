@@ -1,179 +1,97 @@
 package com.vishala.kokoromichael
 
 import android.content.Context
-
 import java.io.File
-import java.io.FileOutputStream
-
 
 object ModelDownloader {
-
-    private const val MODEL_ASSET =
-        "kokoro/kokoro-v1.0.int8.onnx"
-
-    private const val VOICE_ASSET =
-        "kokoro/am_michael.bin"
-
 
     data class ModelFiles(
         val modelFile: File,
         val voiceFile: File
     )
 
+    private const val MODEL_ASSET =
+        "kokoro/kokoro.onnx"
 
-    fun prepare(
-        context: Context
-    ): ModelFiles {
+    private const val VOICE_ASSET =
+        "kokoro/am_michael.bin"
 
-        val directory =
-            File(
-                context.filesDir,
-                "kokoro"
-            )
+    private const val MODEL_NAME =
+        "kokoro.onnx"
 
+    private const val VOICE_NAME =
+        "am_michael.bin"
 
-        if (!directory.exists()) {
+    @Synchronized
+    fun prepare(context: Context): ModelFiles {
 
-            directory.mkdirs()
+        val modelDir = File(
+            context.filesDir,
+            "kokoro"
+        )
+
+        if (!modelDir.exists()) {
+            modelDir.mkdirs()
         }
 
+        val modelFile = File(
+            modelDir,
+            MODEL_NAME
+        )
 
-        val modelFile =
-            File(
-                directory,
-                "kokoro-v1.0.int8.onnx"
-            )
+        val voiceFile = File(
+            modelDir,
+            VOICE_NAME
+        )
 
-
-        val voiceFile =
-            File(
-                directory,
-                "am_michael.bin"
-            )
-
-
-        copyIfNeeded(
+        copyAssetIfNeeded(
             context,
             MODEL_ASSET,
             modelFile
         )
 
-
-        copyIfNeeded(
+        copyAssetIfNeeded(
             context,
             VOICE_ASSET,
             voiceFile
         )
 
-
-        if (
-            !modelFile.exists() ||
-            modelFile.length() == 0L
-        ) {
-
+        if (!modelFile.exists() || modelFile.length() == 0L) {
             throw IllegalStateException(
-                "Kokoro model is missing"
+                "Kokoro model file is missing"
             )
         }
 
-
-        if (
-            !voiceFile.exists() ||
-            voiceFile.length() == 0L
-        ) {
-
+        if (!voiceFile.exists() || voiceFile.length() == 0L) {
             throw IllegalStateException(
-                "Michael voice is missing"
+                "Michael voice file is missing"
             )
         }
-
 
         return ModelFiles(
-            modelFile,
-            voiceFile
+            modelFile = modelFile,
+            voiceFile = voiceFile
         )
     }
 
-
-    private fun copyIfNeeded(
+    private fun copyAssetIfNeeded(
         context: Context,
         assetPath: String,
         destination: File
     ) {
-
-        if (
-            destination.exists() &&
-            destination.length() > 0L
-        ) {
+        if (destination.exists() && destination.length() > 0L) {
             return
         }
 
+        destination.parentFile?.mkdirs()
 
-        val temporary =
-            File(
-                destination.parentFile,
-                destination.name + ".part"
-            )
-
-
-        if (temporary.exists()) {
-            temporary.delete()
-        }
-
-
-        context.assets
-            .open(assetPath)
-            .use { input ->
-
-                FileOutputStream(
-                    temporary
-                ).use { output ->
-
-                    val buffer =
-                        ByteArray(
-                            1024 * 1024
-                        )
-
-                    while (true) {
-
-                        val count =
-                            input.read(
-                                buffer
-                            )
-
-                        if (count <= 0) {
-                            break
-                        }
-
-                        output.write(
-                            buffer,
-                            0,
-                            count
-                        )
-                    }
-
-                    output.flush()
-                }
+        context.assets.open(assetPath).use { input ->
+            destination.outputStream().use { output ->
+                input.copyTo(
+                    output,
+                    DEFAULT_BUFFER_SIZE
+                )
             }
-
-
-        if (destination.exists()) {
-            destination.delete()
-        }
-
-
-        if (
-            !temporary.renameTo(
-                destination
-            )
-        ) {
-
-            temporary.copyTo(
-                destination,
-                overwrite = true
-            )
-
-            temporary.delete()
         }
     }
 }
