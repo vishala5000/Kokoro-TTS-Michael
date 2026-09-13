@@ -13,7 +13,6 @@ env:
   KOKORO_VERSION: "0.1.5"
   ANDROID_API: "35"
   ANDROID_NDK_VERSION: "27.2.12479018"
-  RUST_VERSION: "stable"
 
 jobs:
   build:
@@ -48,7 +47,10 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK components
+        shell: bash
         run: |
+          set -e
+
           yes | sdkmanager --licenses >/dev/null || true
 
           sdkmanager \
@@ -58,7 +60,9 @@ jobs:
             "ndk;${ANDROID_NDK_VERSION}"
 
           echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" \
+            >> "$GITHUB_ENV"
 
 
       # ============================================================
@@ -68,62 +72,54 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: |
-            aarch64-linux-android
+          targets: aarch64-linux-android
 
 
       # ============================================================
-      # 5. RUST CACHE
+      # 5. ANDROID RUST TARGET
       # ============================================================
 
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ${{ github.workspace }}/rust-target
-          key: ${{ runner.os }}-cargo-kokoro-${{ hashFiles('**/Cargo.toml', '**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-kokoro-
-            ${{ runner.os }}-cargo-
-
-
-      # ============================================================
-      # 6. INSTALL ANDROID RUST TARGET
-      # ============================================================
-
-      - name: Add Android Rust target
+      - name: Install Android Rust target
+        shell: bash
         run: |
+          set -e
+
           rustup target add aarch64-linux-android
 
 
       # ============================================================
-      # 7. ANDROID LINKER
+      # 6. ANDROID LINKER
       # ============================================================
 
       - name: Configure Android linker
+        shell: bash
         run: |
+          set -e
+
           NDK="$ANDROID_NDK_HOME"
 
           TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
 
           echo "PATH=$TOOLCHAIN:$PATH" >> "$GITHUB_ENV"
 
-          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TOOLCHAIN/aarch64-linux-android35-clang" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$TOOLCHAIN/aarch64-linux-android35-clang" \
+            >> "$GITHUB_ENV"
 
-          echo "AR_aarch64_linux_android=$TOOLCHAIN/llvm-ar" >> "$GITHUB_ENV"
+          echo "AR_aarch64_linux_android=$TOOLCHAIN/llvm-ar" \
+            >> "$GITHUB_ENV"
 
-          echo "CC_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android35-clang" >> "$GITHUB_ENV"
+          echo "CC_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android35-clang" \
+            >> "$GITHUB_ENV"
 
-          echo "CXX_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android35-clang++" >> "$GITHUB_ENV"
+          echo "CXX_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android35-clang++" \
+            >> "$GITHUB_ENV"
 
 
       # ============================================================
-      # 8. CREATE TEMP RUST PROJECT
+      # 7. CREATE JNI RUST PROJECT
       # ============================================================
 
-      - name: Create Rust JNI project
+      - name: Create JNI Rust project
         shell: bash
         run: |
           set -e
@@ -131,9 +127,6 @@ jobs:
           rm -rf "$RUNNER_TEMP/kokoro-rust"
 
           mkdir -p "$RUNNER_TEMP/kokoro-rust/src"
-
-          cp app/src/main/rust/lib.rs \
-             "$RUNNER_TEMP/kokoro-rust/src/lib.rs"
 
           cat > "$RUNNER_TEMP/kokoro-rust/Cargo.toml" <<'EOF'
           [package]
@@ -161,13 +154,136 @@ jobs:
           }
           EOF
 
+
+      # ============================================================
+      # 8. CREATE JNI SOURCE
+      # ============================================================
+
+      - name: Create JNI source
+        shell: bash
+        run: |
+          set -e
+
+          cat > "$RUNNER_TEMP/kokoro-rust/src/lib.rs" <<'EOF'
+          use jni::objects::{JClass, JString};
+          use jni::sys::jfloat;
+          use jni::JNIEnv;
+
+          use std::path::Path;
+          use std::sync::{Mutex, OnceLock};
+
+          use kokoro_en::{KokoroTts, Voice};
+
+          static ENGINE: OnceLock<Mutex<Option<KokoroTts>>> = OnceLock::new();
+
+          fn engine() -> &'static Mutex<Option<KokoroTts>> {
+              ENGINE.get_or_init(|| Mutex::new(None))
+          }
+
+          #[no_mangle]
+          pub extern "system" fn Java_com_vishala_kokoromichael_KokoroEngine_nativeInit(
+              mut env: JNIEnv,
+              _class: JClass,
+              model_path: JString,
+              voice_path: JString,
+          ) -> jni::sys::jboolean {
+              let model_path: String = match env.get_string(&model_path) {
+                  Ok(value) => value.into(),
+                  Err(_) => return 0,
+              };
+
+              let voice_path: String = match env.get_string(&voice_path) {
+                  Ok(value) => value.into(),
+                  Err(_) => return 0,
+              };
+
+              let model = Path::new(&model_path);
+              let voice = Path::new(&voice_path);
+
+              let result = KokoroTts::new(model, voice);
+
+              match result {
+                  Ok(tts) => {
+                      if let Ok(mut guard) = engine().lock() {
+                          *guard = Some(tts);
+                          1
+                      } else {
+                          0
+                      }
+                  }
+
+                  Err(_) => 0,
+              }
+          }
+
+          #[no_mangle]
+          pub extern "system" fn Java_com_vishala_kokoromichael_KokoroEngine_nativeSynthesize(
+              mut env: JNIEnv,
+              _class: JClass,
+              text: JString,
+              speed: jfloat,
+          ) -> jni::sys::jbyteArray {
+              let text: String = match env.get_string(&text) {
+                  Ok(value) => value.into(),
+                  Err(_) => return std::ptr::null_mut(),
+              };
+
+              let mut guard = match engine().lock() {
+                  Ok(value) => value,
+                  Err(_) => return std::ptr::null_mut(),
+              };
+
+              let tts = match guard.as_mut() {
+                  Some(value) => value,
+                  None => return std::ptr::null_mut(),
+              };
+
+              let speed = speed as f32;
+
+              let result = tts.synth(&text, speed);
+
+              let audio = match result {
+                  Ok(value) => value,
+                  Err(_) => return std::ptr::null_mut(),
+              };
+
+              match env.byte_array_from_slice(&audio) {
+                  Ok(array) => array.into_raw(),
+                  Err(_) => std::ptr::null_mut(),
+              }
+          }
+
+          #[no_mangle]
+          pub extern "system" fn Java_com_vishala_kokoromichael_KokoroEngine_nativeRelease(
+              _env: JNIEnv,
+              _class: JClass,
+          ) {
+              if let Ok(mut guard) = engine().lock() {
+                  *guard = None;
+              }
+          }
+          EOF
+
+          echo "JNI source created:"
+          wc -l "$RUNNER_TEMP/kokoro-rust/src/lib.rs"
+
+
+      # ============================================================
+      # 9. CREATE LOCKFILE
+      # ============================================================
+
+      - name: Generate Cargo lockfile
+        shell: bash
+        run: |
+          set -e
+
           cd "$RUNNER_TEMP/kokoro-rust"
 
           cargo generate-lockfile
 
 
       # ============================================================
-      # 9. DOWNLOAD kokoro-en 0.1.5
+      # 10. DOWNLOAD KOKORO-EN
       # ============================================================
 
       - name: Download kokoro-en 0.1.5
@@ -177,82 +293,84 @@ jobs:
 
           cd "$RUNNER_TEMP/kokoro-rust"
 
-          echo "Fetching kokoro-en ${KOKORO_VERSION}..."
-
           cargo fetch
 
           echo
-          echo "Searching Cargo registry..."
+          echo "Searching for kokoro-en..."
           echo
 
           find "$HOME/.cargo/registry/src" \
-            -maxdepth 3 \
             -type d \
             -name "kokoro-en-${KOKORO_VERSION}" \
             -print
 
 
       # ============================================================
-      # 10. LOCATE AND COPY REAL kokoro-en SOURCE
+      # 11. LOCATE KOKORO-EN
       # ============================================================
 
-      - name: Vendor kokoro-en source
+      - name: Locate kokoro-en source
         shell: bash
         run: |
           set -e
 
-          SRC="$(find "$HOME/.cargo/registry/src" \
-            -maxdepth 3 \
-            -type d \
-            -name "kokoro-en-${KOKORO_VERSION}" \
-            | head -n 1)"
+          SRC="$(
+            find "$HOME/.cargo/registry/src" \
+              -type d \
+              -name "kokoro-en-${KOKORO_VERSION}" \
+              | head -n 1
+          )"
 
           if [ -z "$SRC" ]; then
-            echo "ERROR: kokoro-en ${KOKORO_VERSION} was not found."
+            echo "ERROR: kokoro-en ${KOKORO_VERSION} not found."
             exit 1
           fi
 
-          echo "Found:"
+          echo "Kokoro source:"
           echo "$SRC"
 
           rm -rf "$RUNNER_TEMP/kokoro-en-patched"
 
           cp -a "$SRC" "$RUNNER_TEMP/kokoro-en-patched"
 
-          echo "KOKORO_PATCHED=$RUNNER_TEMP/kokoro-en-patched" >> "$GITHUB_ENV"
-
-          echo
-          echo "kokoro-en source:"
-          find "$RUNNER_TEMP/kokoro-en-patched/src" \
-            -maxdepth 3 \
-            -type f \
-            -name "*.rs" \
-            -print
+          echo "KOKORO_PATCHED=$RUNNER_TEMP/kokoro-en-patched" \
+            >> "$GITHUB_ENV"
 
 
       # ============================================================
-      # 11. INSPECT kokoro-en ORT CODE
+      # 12. SHOW ACTUAL KOKORO SOURCE
       # ============================================================
 
-      - name: Inspect ONNX Runtime session code
+      - name: Inspect kokoro-en source
         shell: bash
         run: |
           set -e
 
-          echo "Searching for ORT SessionBuilder..."
+          echo "========================================"
+          echo "kokoro-en 0.1.5 source files"
+          echo "========================================"
+
+          find "$KOKORO_PATCHED/src" \
+            -type f \
+            -name "*.rs" \
+            -print
+
           echo
+          echo "========================================"
+          echo "ORT-related source"
+          echo "========================================"
 
           grep -Rni \
-            -E "Session::builder|SessionBuilder|commit_from_file|with_intra_threads|with_inter_threads|optimization" \
+            -E "Session::builder|SessionBuilder|commit_from_file|with_intra_threads|with_inter_threads|ExecutionProvider|GraphOptimization" \
             "$KOKORO_PATCHED/src" \
             || true
 
 
       # ============================================================
-      # 12. PATCH kokoro-en FOR CPU
+      # 13. PATCH ONLY IF ACTUAL SOURCE SUPPORTS IT
       # ============================================================
 
-      - name: Patch kokoro-en CPU inference
+      - name: Patch kokoro-en
         shell: python3
         run: |
           import os
@@ -261,113 +379,58 @@ jobs:
 
           root = Path(os.environ["KOKORO_PATCHED"])
 
-          print("Patching:", root)
+          print("Checking actual kokoro-en 0.1.5 source...")
 
-          rust_files = list((root / "src").rglob("*.rs"))
+          found = False
 
-          session_files = []
-
-          for path in rust_files:
+          for path in (root / "src").rglob("*.rs"):
               text = path.read_text(encoding="utf-8")
 
-              if (
-                  "Session::builder" in text
-                  or "commit_from_file" in text
-                  or "SessionBuilder" in text
+              if "Session::builder" not in text:
+                  continue
+
+              print()
+              print("Found Session::builder in:")
+              print(path)
+
+              print()
+              print("Relevant code:")
+              
+              for line_number, line in enumerate(
+                  text.splitlines(), 1
               ):
-                  session_files.append(path)
+                  if "Session::builder" in line:
+                      start = max(0, line_number - 5)
+                      end = line_number + 10
 
-          print("Possible ORT files:")
+                      lines = text.splitlines()
 
-          for path in session_files:
-              print(" -", path)
+                      for i in range(start, min(end, len(lines))):
+                          print(
+                              f"{i + 1:04d}: {lines[i]}"
+                          )
 
-          if not session_files:
-              raise SystemExit(
-                  "ERROR: Could not find ONNX Runtime session builder "
-                  "inside kokoro-en 0.1.5."
-              )
+              found = True
 
-          patched = False
-
-          for path in session_files:
-
-              text = path.read_text(encoding="utf-8")
-
-              # ----------------------------------------------------
-              # Case 1:
-              #
-              # Session::builder()?
-              #
-              # becomes:
-              #
-              # Session::builder()?
-              #     .with_intra_threads(...)
-              #     .with_inter_threads(...)
-              #     .with_parallel_execution(...)
-              #
-              # ----------------------------------------------------
-
-              pattern = r"Session::builder\(\)\?"
-
-              replacement = """Session::builder()?
-                  .with_intra_threads(
-                      std::thread::available_parallelism()
-                          .map(|n| n.get())
-                          .unwrap_or(4)
-                  )?
-                  .with_inter_threads(1)?
-                  .with_parallel_execution(false)?"""
-
-              new_text, count = re.subn(
-                  pattern,
-                  replacement,
-                  text,
-                  count=1
-              )
-
-              if count:
-                  path.write_text(new_text, encoding="utf-8")
-
-                  print()
-                  print("PATCHED:", path)
-                  print("Inserted Android CPU thread configuration.")
-
-                  patched = True
-                  break
-
-          if not patched:
+          if not found:
               print()
               print(
-                  "WARNING: No direct Session::builder() pattern was found."
+                  "No Session::builder() was found in the actual "
+                  "kokoro-en 0.1.5 source."
               )
+              print()
               print(
-                  "The build will continue using kokoro-en's internal "
-                  "session configuration."
+                  "NO UNSAFE SOURCE PATCH WAS APPLIED."
+              )
+              print()
+              print(
+                  "This is intentional: the workflow will not "
+                  "pretend that an optimization was applied."
               )
 
 
       # ============================================================
-      # 13. SHOW PATCH
-      # ============================================================
-
-      - name: Verify patched kokoro-en
-        shell: bash
-        run: |
-          set -e
-
-          echo "================================================"
-          echo "Patched kokoro-en source"
-          echo "================================================"
-
-          grep -Rni \
-            -E "with_intra_threads|with_inter_threads|with_parallel_execution" \
-            "$KOKORO_PATCHED/src" \
-            || true
-
-
-      # ============================================================
-      # 14. FORCE CARGO TO USE PATCHED CRATE
+      # 14. USE PATCHED CRATE
       # ============================================================
 
       - name: Configure Cargo patch
@@ -384,66 +447,67 @@ jobs:
           EOF
 
           echo
-          echo "Final Cargo.toml:"
+          echo "Cargo configuration:"
           cat Cargo.toml
 
 
       # ============================================================
-      # 15. FORCE ONNX RUNTIME CPU
+      # 15. CPU RUNTIME
       # ============================================================
 
-      - name: Configure Kokoro CPU runtime
+      - name: Configure CPU runtime
+        shell: bash
         run: |
+          set -e
+
           echo "KOKORO_ORT_PROVIDER=cpu" >> "$GITHUB_ENV"
 
-          # Do not dynamically oversubscribe the CPU.
-          #
-          # ORT itself controls the inference threads.
-          # The patched kokoro-en session uses:
-          #
-          # intra-op = available Android CPU cores
-          # inter-op = 1
-          # parallel execution = false
-
           echo "OMP_NUM_THREADS=4" >> "$GITHUB_ENV"
+
           echo "OMP_DYNAMIC=FALSE" >> "$GITHUB_ENV"
-          echo "OMP_WAIT_POLICY=ACTIVE" >> "$GITHUB_ENV"
 
 
       # ============================================================
-      # 16. BUILD RUST JNI
+      # 16. BUILD ARM64 RUST LIBRARY
       # ============================================================
 
-      - name: Build Rust JNI ARM64
+      - name: Build ARM64 Rust JNI
         shell: bash
         run: |
           set -e
 
           cd "$RUNNER_TEMP/kokoro-rust"
 
-          export CARGO_BUILD_TARGET=aarch64-linux-android
-
           cargo build \
             --release \
             --target aarch64-linux-android
 
-          mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
+
+      # ============================================================
+      # 17. COPY NATIVE LIBRARY
+      # ============================================================
+
+      - name: Install native library
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p \
+            "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
 
           cp \
-            target/aarch64-linux-android/release/libkokoro_jni.so \
+            "$RUNNER_TEMP/kokoro-rust/target/aarch64-linux-android/release/libkokoro_jni.so" \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libkokoro_jni.so"
 
-          echo
-          echo "Native library:"
           ls -lh \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libkokoro_jni.so"
 
 
       # ============================================================
-      # 17. VERIFY ELF ARCHITECTURE
+      # 18. VERIFY ARM64
       # ============================================================
 
-      - name: Verify ARM64 native library
+      - name: Verify native library
         shell: bash
         run: |
           set -e
@@ -457,10 +521,10 @@ jobs:
 
 
       # ============================================================
-      # 18. BUILD ANDROID APK
+      # 19. BUILD APK
       # ============================================================
 
-      - name: Build Android APK
+      - name: Build APK
         shell: bash
         run: |
           set -e
@@ -474,7 +538,7 @@ jobs:
 
 
       # ============================================================
-      # 19. FIND APK
+      # 20. FIND APK
       # ============================================================
 
       - name: Find APK
@@ -482,7 +546,6 @@ jobs:
         run: |
           set -e
 
-          echo "APK files:"
           find app/build/outputs/apk \
             -type f \
             -name "*.apk" \
@@ -490,26 +553,24 @@ jobs:
 
 
       # ============================================================
-      # 20. UPLOAD APK
+      # 21. UPLOAD APK
       # ============================================================
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Kokoro-TTS-Michael-ARM64
-          path: |
-            app/build/outputs/apk/**/*.apk
+          path: app/build/outputs/apk/**/*.apk
           if-no-files-found: error
 
 
       # ============================================================
-      # 21. UPLOAD NATIVE LIBRARY FOR DEBUGGING
+      # 22. UPLOAD NATIVE LIBRARY
       # ============================================================
 
       - name: Upload native library
         uses: actions/upload-artifact@v4
         with:
-          name: kokoro-jni-arm64
-          path: |
-            app/src/main/jniLibs/arm64-v8a/libkokoro_jni.so
+          name: Kokoro-JNI-ARM64
+          path: app/src/main/jniLibs/arm64-v8a/libkokoro_jni.so
           if-no-files-found: error
