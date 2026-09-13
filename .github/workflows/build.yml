@@ -194,6 +194,7 @@ jobs:
 
           print()
           print("Available voices:")
+
           for name in data.files:
               print(" -", name)
 
@@ -242,6 +243,10 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/kokoro-native/src"
 
+
+      # ============================================================
+      # CREATE NATIVE CARGO.TOML
+      # ============================================================
 
       - name: Create native Cargo.toml
         run: |
@@ -329,7 +334,11 @@ jobs:
           }
 
 
-          #[no_mangle]
+          // ========================================================
+          // INITIALIZE KOKORO
+          // ========================================================
+
+          #[unsafe(no_mangle)]
           pub extern "system" fn Java_com_vishala_kokoromichael_KokoroEngine_nativeInit(
               mut env: JNIEnv,
               _class: JClass,
@@ -339,7 +348,9 @@ jobs:
 
               let model_path: String =
                   match env.get_string(&model_path) {
+
                       Ok(value) => value.into(),
+
                       Err(error) => {
                           return make_error(
                               &mut env,
@@ -354,7 +365,9 @@ jobs:
 
               let voice_path: String =
                   match env.get_string(&voice_path) {
+
                       Ok(value) => value.into(),
+
                       Err(error) => {
                           return make_error(
                               &mut env,
@@ -388,11 +401,14 @@ jobs:
                       match lock {
 
                           Ok(mut guard) => {
+
                               *guard = Some(tts);
+
                               std::ptr::null_mut()
                           }
 
                           Err(error) => {
+
                               make_error(
                                   &mut env,
                                   format!(
@@ -405,6 +421,7 @@ jobs:
                   }
 
                   Err(error) => {
+
                       make_error(
                           &mut env,
                           format!(
@@ -417,7 +434,11 @@ jobs:
           }
 
 
-          #[no_mangle]
+          // ========================================================
+          // SYNTHESIZE
+          // ========================================================
+
+          #[unsafe(no_mangle)]
           pub extern "system" fn Java_com_vishala_kokoromichael_KokoroEngine_nativeSynthesize(
               mut env: JNIEnv,
               _class: JClass,
@@ -427,16 +448,19 @@ jobs:
 
               let text: String =
                   match env.get_string(&text) {
+
                       Ok(value) => value.into(),
+
                       Err(error) => {
 
-                          let _ = env.throw_new(
-                              "java/lang/RuntimeException",
-                              format!(
-                                  "Cannot read text: {}",
-                                  error
-                              ),
-                          );
+                          let _ =
+                              env.throw_new(
+                                  "java/lang/RuntimeException",
+                                  format!(
+                                      "Cannot read text: {}",
+                                      error
+                                  ),
+                              );
 
                           return std::ptr::null_mut();
                       }
@@ -468,24 +492,23 @@ jobs:
                                           &text,
                                           Voice::new(
                                               "am_michael"
-                                          ).with_speed(
+                                          )
+                                          .with_speed(
                                               speed
                                           ),
                                       )
                                   )
-
                               }
 
                               None => {
-                                  return {
-                                      let _ =
-                                          env.throw_new(
-                                              "java/lang/IllegalStateException",
-                                              "Kokoro engine is not initialized"
-                                          );
 
-                                      std::ptr::null_mut()
-                                  };
+                                  let _ =
+                                      env.throw_new(
+                                          "java/lang/IllegalStateException",
+                                          "Kokoro engine is not initialized"
+                                      );
+
+                                  return std::ptr::null_mut();
                               }
                           }
                       }
@@ -529,15 +552,14 @@ jobs:
 
 
               /*
-               * Kokoro outputs mono float32 PCM at 24 kHz.
+               * Kokoro output:
                *
-               * Convert:
+               * mono
+               * float32
+               * 24,000 Hz
                *
-               * float32 [-1,1]
-               *
-               * into:
-               *
-               * signed 16-bit PCM
+               * Convert float32 [-1,1]
+               * to signed 16-bit PCM.
                */
 
               let mut pcm =
@@ -564,11 +586,24 @@ jobs:
               }
 
 
+              /*
+               * jni 0.21 returns a JPrimitiveArray wrapper.
+               *
+               * JNI requires the raw jbyteArray.
+               *
+               * Therefore:
+               *
+               * array.into_raw()
+               */
+
               match env.byte_array_from_slice(
                   &pcm
               ) {
 
-                  Ok(array) => array,
+                  Ok(array) => {
+
+                      array.into_raw()
+                  }
 
                   Err(error) => {
 
@@ -587,7 +622,11 @@ jobs:
           }
 
 
-          #[no_mangle]
+          // ========================================================
+          // RELEASE
+          // ========================================================
+
+          #[unsafe(no_mangle)]
           pub extern "system" fn Java_com_vishala_kokoromichael_KokoroEngine_nativeRelease(
               _env: JNIEnv,
               _class: JClass,
@@ -657,6 +696,7 @@ jobs:
             app/src/main/assets/kokoro/am_michael.bin
 
           echo "Embedded assets:"
+
           ls -lh \
             app/src/main/assets/kokoro
 
