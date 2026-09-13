@@ -44,11 +44,9 @@ jobs:
 
           echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
 
-          test -d \
-            "$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          test -d "$ANDROID_SDK_ROOT/ndk/27.3.13750724"
 
-          ls -la \
-            "$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          ls -la "$ANDROID_SDK_ROOT/ndk/27.3.13750724"
 
 
       - name: Set up Gradle
@@ -88,7 +86,6 @@ jobs:
 
           VOICE_URL="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/voices/am_michael.bin?download=true"
 
-
           echo "========================================"
           echo "DOWNLOADING KOKORO INT8 MODEL"
           echo "========================================"
@@ -100,7 +97,6 @@ jobs:
             --retry-delay 2 \
             "$MODEL_URL" \
             -o "$KOKORO_DIR/kokoro.onnx"
-
 
           echo ""
           echo "========================================"
@@ -115,13 +111,8 @@ jobs:
             "$VOICE_URL" \
             -o "$KOKORO_DIR/am_michael.bin"
 
-
-          test -s \
-            "$KOKORO_DIR/kokoro.onnx"
-
-          test -s \
-            "$KOKORO_DIR/am_michael.bin"
-
+          test -s "$KOKORO_DIR/kokoro.onnx"
+          test -s "$KOKORO_DIR/am_michael.bin"
 
           echo ""
           echo "========================================"
@@ -140,14 +131,11 @@ jobs:
 
           rm -rf "$RUST_DIR"
 
-          mkdir -p \
-            "$RUST_DIR/src"
-
+          mkdir -p "$RUST_DIR/src"
 
           echo "========================================"
           echo "CREATING RUST JNI PROJECT"
           echo "========================================"
-
 
           cat > "$RUST_DIR/Cargo.toml" <<'EOF'
           [package]
@@ -181,27 +169,10 @@ jobs:
           use kokoro_en::{KokoroTts, Voice};
 
 
-          /*
-           * Kokoro engine.
-           *
-           * The engine is initialized once and reused for all
-           * subsequent synthesis calls.
-           */
           static ENGINE: Mutex<Option<KokoroTts>> =
               Mutex::new(None);
 
 
-          /*
-           * Tokio runtime.
-           *
-           * IMPORTANT:
-           *
-           * The previous implementation created a brand-new
-           * Tokio runtime every time nativeSynthesize() was called.
-           *
-           * This implementation creates the runtime only once
-           * and reuses it.
-           */
           static RUNTIME: OnceLock<tokio::runtime::Runtime> =
               OnceLock::new();
 
@@ -239,15 +210,6 @@ jobs:
                   };
 
 
-              /*
-               * Locate the G2P lexicon next to the model.
-               *
-               * Expected:
-               *
-               * files/kokoro/kokoro.onnx
-               * files/kokoro/am_michael.bin
-               * files/kokoro/kokoro-g2p.tab
-               */
               let lexicon_path =
                   std::path::Path::new(&model_path)
                       .parent()
@@ -270,9 +232,6 @@ jobs:
               }
 
 
-              /*
-               * Create the reusable Tokio runtime once.
-               */
               let runtime =
                   match get_runtime() {
                       Some(value) => value,
@@ -280,9 +239,6 @@ jobs:
                   };
 
 
-              /*
-               * Initialize Kokoro once.
-               */
               let result =
                   runtime.block_on(async {
 
@@ -290,6 +246,7 @@ jobs:
                           &model_path,
                           &voice_path
                       ).await
+
                   });
 
 
@@ -331,6 +288,7 @@ jobs:
                       Err(_) => {
                           return std::ptr::null_mut();
                       }
+
                   };
 
 
@@ -339,9 +297,6 @@ jobs:
               }
 
 
-              /*
-               * Keep the requested speed inside the supported range.
-               */
               let speed =
                   speed.clamp(
                       0.5,
@@ -349,9 +304,6 @@ jobs:
                   );
 
 
-              /*
-               * Get the already-created Kokoro engine.
-               */
               let mut engine =
                   match ENGINE.lock() {
 
@@ -360,6 +312,7 @@ jobs:
                       Err(_) => {
                           return std::ptr::null_mut();
                       }
+
                   };
 
 
@@ -371,14 +324,10 @@ jobs:
                       None => {
                           return std::ptr::null_mut();
                       }
+
                   };
 
 
-              /*
-               * Reuse the single Tokio runtime.
-               *
-               * NO new runtime is created here.
-               */
               let runtime =
                   match get_runtime() {
 
@@ -387,12 +336,10 @@ jobs:
                       None => {
                           return std::ptr::null_mut();
                       }
+
                   };
 
 
-              /*
-               * Synthesize using Michael.
-               */
               let result =
                   runtime.block_on(async {
 
@@ -405,14 +352,10 @@ jobs:
                           &text,
                           voice
                       ).await
+
                   });
 
 
-              /*
-               * kokoro-en returns:
-               *
-               * (Vec<f32>, Duration)
-               */
               let (audio, _duration) =
                   match result {
 
@@ -421,12 +364,10 @@ jobs:
                       Err(_) => {
                           return std::ptr::null_mut();
                       }
+
                   };
 
 
-              /*
-               * Convert Float32 PCM to signed 16-bit PCM.
-               */
               let mut pcm =
                   Vec::<u8>::with_capacity(
                       audio.len() * 2
@@ -452,6 +393,7 @@ jobs:
 
                           (sample * 32768.0)
                               as i16
+
                       };
 
 
@@ -461,9 +403,6 @@ jobs:
               }
 
 
-              /*
-               * Return raw PCM bytes to Kotlin.
-               */
               match env.byte_array_from_slice(&pcm) {
 
                   Ok(array) => {
@@ -473,6 +412,7 @@ jobs:
                   Err(_) => {
                       std::ptr::null_mut()
                   }
+
               }
           }
 
@@ -488,6 +428,7 @@ jobs:
               {
                   *engine = None;
               }
+
           }
           EOF
 
@@ -510,14 +451,8 @@ jobs:
 
           RUST_DIR="$RUNNER_TEMP/kokoro-rust"
 
-
-          /*
-           * Force cargo-ndk to use the actual installed NDK.
-           */
           export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
-
           export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
-
 
           echo "========================================"
           echo "ANDROID NDK"
@@ -527,19 +462,17 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
 
+          test -d "$ANDROID_NDK_ROOT"
 
-          test -d \
-            "$ANDROID_NDK_ROOT"
-
+          echo ""
+          echo "NDK directory verified."
 
           cd "$RUST_DIR"
-
 
           echo ""
           echo "========================================"
           echo "BUILDING RUST JNI"
           echo "========================================"
-
 
           cargo ndk \
             -t arm64-v8a \
@@ -547,12 +480,10 @@ jobs:
             -o "$GITHUB_WORKSPACE/app/src/main/jniLibs" \
             build --release
 
-
           echo ""
           echo "========================================"
           echo "RUST JNI BUILD COMPLETED"
           echo "========================================"
-
 
           find \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs" \
@@ -570,27 +501,22 @@ jobs:
 
           LIBCXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
 
-
           echo "========================================"
           echo "CHECKING libc++_shared.so"
           echo "========================================"
 
-
           test -f "$LIBCXX"
-
 
           mkdir -p \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
-
 
           cp \
             "$LIBCXX" \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libc++_shared.so"
 
-
           echo ""
           echo "libc++_shared.so:"
-          
+
           ls -lh \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libc++_shared.so"
 
@@ -604,59 +530,47 @@ jobs:
 
           mkdir -p "$ASSET_DIR"
 
-
           cp \
             "$RUNNER_TEMP/kokoro/kokoro.onnx" \
             "$ASSET_DIR/kokoro.onnx"
-
 
           cp \
             "$RUNNER_TEMP/kokoro/am_michael.bin" \
             "$ASSET_DIR/am_michael.bin"
 
-
           cp \
             "$RUNNER_TEMP/kokoro-rust/kokoro-g2p.tab" \
             "$ASSET_DIR/kokoro-g2p.tab"
-
 
           echo "========================================"
           echo "KOKORO ASSETS"
           echo "========================================"
 
-
           ls -lh "$ASSET_DIR"
-
 
           test -s \
             "$ASSET_DIR/kokoro.onnx"
 
-
           test -s \
             "$ASSET_DIR/am_michael.bin"
 
-
           test -s \
             "$ASSET_DIR/kokoro-g2p.tab"
-
 
           echo ""
           echo "Model:"
           ls -lh \
             "$ASSET_DIR/kokoro.onnx"
 
-
           echo ""
           echo "Michael voice:"
           ls -lh \
             "$ASSET_DIR/am_michael.bin"
 
-
           echo ""
           echo "G2P lexicon:"
           cat \
             "$ASSET_DIR/kokoro-g2p.tab"
-
 
           echo ""
           echo "All Kokoro assets bundled successfully."
@@ -671,39 +585,31 @@ jobs:
           echo "VERIFYING NATIVE LIBRARIES"
           echo "========================================"
 
-
           test -f \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libkokoro_jni.so"
 
-
           test -f \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libc++_shared.so"
-
 
           echo ""
           echo "========================================"
           echo "VERIFYING KOKORO ASSETS"
           echo "========================================"
 
-
           test -s \
             "$GITHUB_WORKSPACE/app/src/main/assets/kokoro/kokoro.onnx"
-
 
           test -s \
             "$GITHUB_WORKSPACE/app/src/main/assets/kokoro/am_michael.bin"
 
-
           test -s \
             "$GITHUB_WORKSPACE/app/src/main/assets/kokoro/kokoro-g2p.tab"
-
 
           echo ""
           echo "Native libraries:"
 
           ls -lh \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
-
 
           echo ""
           echo "Kokoro assets:"
@@ -721,7 +627,6 @@ jobs:
           echo "BUILDING RELEASE APK"
           echo "========================================"
 
-
           gradle \
             --no-daemon \
             --stacktrace \
@@ -736,7 +641,6 @@ jobs:
           mkdir -p \
             "$GITHUB_WORKSPACE/output"
 
-
           APK="$(
             find \
               "$GITHUB_WORKSPACE/app/build/outputs/apk/release" \
@@ -745,29 +649,24 @@ jobs:
               | head -n 1
           )"
 
-
           if [ -z "$APK" ]; then
             echo "ERROR: APK was not found."
             exit 1
           fi
-
 
           if [ ! -f "$APK" ]; then
             echo "ERROR: APK file does not exist."
             exit 1
           fi
 
-
           cp \
             "$APK" \
             "$GITHUB_WORKSPACE/output/Kokoro-TTS-Michael.apk"
-
 
           echo ""
           echo "========================================"
           echo "FINAL APK"
           echo "========================================"
-
 
           ls -lh \
             "$GITHUB_WORKSPACE/output/Kokoro-TTS-Michael.apk"
