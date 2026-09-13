@@ -37,7 +37,6 @@ jobs:
             "build-tools;35.0.0" \
             "ndk;27.3.13750724"
 
-          echo ""
           echo "========================================"
           echo "ANDROID SDK"
           echo "========================================"
@@ -46,7 +45,7 @@ jobs:
 
           test -d "$ANDROID_SDK_ROOT/ndk/27.3.13750724"
 
-          ls -la "$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          echo "NDK verified."
 
 
       - name: Set up Gradle
@@ -68,7 +67,6 @@ jobs:
 
           cargo install cargo-ndk --locked
 
-          echo ""
           cargo ndk --version
 
 
@@ -98,7 +96,6 @@ jobs:
             "$MODEL_URL" \
             -o "$KOKORO_DIR/kokoro.onnx"
 
-          echo ""
           echo "========================================"
           echo "DOWNLOADING MICHAEL VOICE"
           echo "========================================"
@@ -114,7 +111,6 @@ jobs:
           test -s "$KOKORO_DIR/kokoro.onnx"
           test -s "$KOKORO_DIR/am_michael.bin"
 
-          echo ""
           echo "========================================"
           echo "DOWNLOADED FILES"
           echo "========================================"
@@ -180,11 +176,22 @@ jobs:
           fn get_runtime()
               -> Option<&'static tokio::runtime::Runtime>
           {
-              RUNTIME.get_or_try_init(|| {
-                  tokio::runtime::Builder::new_current_thread()
+              if let Some(runtime) = RUNTIME.get() {
+                  return Some(runtime);
+              }
+
+              let runtime =
+                  match tokio::runtime::Builder::new_current_thread()
                       .enable_all()
                       .build()
-              }).ok()
+                  {
+                      Ok(value) => value,
+                      Err(_) => return None,
+                  };
+
+              let _ = RUNTIME.set(runtime);
+
+              RUNTIME.get()
           }
 
 
@@ -433,7 +440,6 @@ jobs:
           EOF
 
 
-          echo ""
           echo "========================================"
           echo "RUST PROJECT CREATED"
           echo "========================================"
@@ -464,12 +470,10 @@ jobs:
 
           test -d "$ANDROID_NDK_ROOT"
 
-          echo ""
           echo "NDK directory verified."
 
           cd "$RUST_DIR"
 
-          echo ""
           echo "========================================"
           echo "BUILDING RUST JNI"
           echo "========================================"
@@ -480,7 +484,6 @@ jobs:
             -o "$GITHUB_WORKSPACE/app/src/main/jniLibs" \
             build --release
 
-          echo ""
           echo "========================================"
           echo "RUST JNI BUILD COMPLETED"
           echo "========================================"
@@ -513,9 +516,6 @@ jobs:
           cp \
             "$LIBCXX" \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libc++_shared.so"
-
-          echo ""
-          echo "libc++_shared.so:"
 
           ls -lh \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libc++_shared.so"
@@ -557,23 +557,7 @@ jobs:
           test -s \
             "$ASSET_DIR/kokoro-g2p.tab"
 
-          echo ""
-          echo "Model:"
-          ls -lh \
-            "$ASSET_DIR/kokoro.onnx"
-
-          echo ""
-          echo "Michael voice:"
-          ls -lh \
-            "$ASSET_DIR/am_michael.bin"
-
-          echo ""
-          echo "G2P lexicon:"
-          cat \
-            "$ASSET_DIR/kokoro-g2p.tab"
-
-          echo ""
-          echo "All Kokoro assets bundled successfully."
+          echo "All Kokoro assets verified."
 
 
       - name: Verify native libraries and assets
@@ -591,7 +575,6 @@ jobs:
           test -f \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libc++_shared.so"
 
-          echo ""
           echo "========================================"
           echo "VERIFYING KOKORO ASSETS"
           echo "========================================"
@@ -605,14 +588,16 @@ jobs:
           test -s \
             "$GITHUB_WORKSPACE/app/src/main/assets/kokoro/kokoro-g2p.tab"
 
-          echo ""
-          echo "Native libraries:"
+          echo "========================================"
+          echo "NATIVE LIBRARIES"
+          echo "========================================"
 
           ls -lh \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
 
-          echo ""
-          echo "Kokoro assets:"
+          echo "========================================"
+          echo "KOKORO ASSETS"
+          echo "========================================"
 
           ls -lh \
             "$GITHUB_WORKSPACE/app/src/main/assets/kokoro"
@@ -654,16 +639,10 @@ jobs:
             exit 1
           fi
 
-          if [ ! -f "$APK" ]; then
-            echo "ERROR: APK file does not exist."
-            exit 1
-          fi
-
           cp \
             "$APK" \
             "$GITHUB_WORKSPACE/output/Kokoro-TTS-Michael.apk"
 
-          echo ""
           echo "========================================"
           echo "FINAL APK"
           echo "========================================"
