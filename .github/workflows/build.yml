@@ -11,11 +11,9 @@ permissions:
 
 env:
   JAVA_VERSION: "17"
-
   ANDROID_API: "35"
   ANDROID_BUILD_TOOLS: "35.0.0"
   ANDROID_NDK_VERSION: "28.1.13356709"
-
   GRADLE_VERSION: "8.13"
 
   MODEL_NAME: "kokoro-v1.0.int8.onnx"
@@ -23,41 +21,48 @@ env:
 
   RELEASE_BASE: "https://github.com/vishala5000/Kokoro-TTS-Michael/releases/download/kokoro"
 
+
 jobs:
+
   build:
+
     name: Build Offline Kokoro APK
+
     runs-on: ubuntu-24.04
+
 
     steps:
 
-      # ============================================================
+      # ---------------------------------------------------------
       # CHECKOUT
-      # ============================================================
+      # ---------------------------------------------------------
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
 
-      # ============================================================
+      # ---------------------------------------------------------
       # JAVA
-      # ============================================================
+      # ---------------------------------------------------------
 
-      - name: Set up Java 17
+      - name: Setup Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
 
-      # ============================================================
-      # ANDROID SDK
-      # ============================================================
+      # ---------------------------------------------------------
+      # ANDROID SDK + NDK
+      # ---------------------------------------------------------
 
-      - name: Set up Android SDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK
+
+      - name: Install Android SDK and NDK
         run: |
+
           yes | sdkmanager --licenses >/dev/null || true
 
           sdkmanager \
@@ -66,23 +71,30 @@ jobs:
             "build-tools;${ANDROID_BUILD_TOOLS}" \
             "ndk;${ANDROID_NDK_VERSION}"
 
+
       - name: Configure Android environment
         run: |
+
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
 
           echo "ANDROID_HOME=$ANDROID_HOME"
+
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}"
 
 
-      # ============================================================
-      # NATIVE BUILD TOOLS
-      # ============================================================
+      # ---------------------------------------------------------
+      # BUILD TOOLS
+      # ---------------------------------------------------------
 
-      - name: Install native build dependencies
+      - name: Install native build tools
         run: |
+
           sudo apt-get update
 
           sudo apt-get install -y \
@@ -94,33 +106,39 @@ jobs:
             python3-pip
 
 
-      # ============================================================
+      # ---------------------------------------------------------
       # RUST
-      # ============================================================
+      # ---------------------------------------------------------
 
-      - name: Install Rust
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
+
 
       - name: Install cargo-ndk
         run: |
           cargo install cargo-ndk --locked
 
 
-      # ============================================================
-      # DOWNLOAD KOKORO MODEL
-      # ============================================================
+      # ---------------------------------------------------------
+      # CREATE TEMP DIRECTORIES
+      # ---------------------------------------------------------
 
-      - name: Create temporary Kokoro directories
+      - name: Create temporary directories
         run: |
+
           mkdir -p "$RUNNER_TEMP/kokoro-assets"
+
           mkdir -p "$RUNNER_TEMP/kokoro-voice"
 
 
+      # ---------------------------------------------------------
+      # DOWNLOAD KOKORO MODEL
+      # ---------------------------------------------------------
+
       - name: Download Kokoro INT8 model
         run: |
-          set -e
 
           curl \
             --fail \
@@ -137,13 +155,12 @@ jobs:
           ls -lh "$RUNNER_TEMP/kokoro-assets/${MODEL_NAME}"
 
 
-      # ============================================================
-      # DOWNLOAD CONSOLIDATED VOICE PACK
-      # ============================================================
+      # ---------------------------------------------------------
+      # DOWNLOAD VOICES
+      # ---------------------------------------------------------
 
-      - name: Download voices.bin
+      - name: Download voices
         run: |
-          set -e
 
           curl \
             --fail \
@@ -160,39 +177,43 @@ jobs:
           ls -lh "$RUNNER_TEMP/kokoro-assets/${VOICES_NAME}"
 
 
-      # ============================================================
-      # EXTRACT ONLY AM_MICHAEL
-      # ============================================================
+      # ---------------------------------------------------------
+      # PYTHON / NUMPY
+      # ---------------------------------------------------------
 
-      - name: Install NumPy
+      - name: Install Python dependency
         run: |
+
           python3 -m pip install --upgrade pip
+
           python3 -m pip install numpy
 
 
-      - name: Extract am_michael voice
+      # ---------------------------------------------------------
+      # EXTRACT ONLY AM_MICHAEL
+      # ---------------------------------------------------------
+
+      - name: Extract Michael voice
         env:
           VOICE_SOURCE: ${{ runner.temp }}/kokoro-assets/voices.bin
           VOICE_OUTPUT: ${{ runner.temp }}/kokoro-voice/am_michael.bin
+
         run: |
-          set -e
 
           python3 <<'PY'
+
           import numpy as np
           import os
 
           source = os.environ["VOICE_SOURCE"]
-          output = os.environ["VOICE_OUTPUT"]
 
-          print("Reading voice pack:")
-          print(source)
+          output = os.environ["VOICE_OUTPUT"]
 
           data = np.load(
               source,
               allow_pickle=False
           )
 
-          print()
           print("Available voices:")
 
           for name in data.files:
@@ -203,31 +224,25 @@ jobs:
                   "ERROR: am_michael was not found in voices.bin"
               )
 
-          voice = data["am_michael"]
-
-          print()
-          print("Original shape:", voice.shape)
-          print("Original dtype:", voice.dtype)
-
           voice = np.asarray(
-              voice,
+              data["am_michael"],
               dtype=np.float32
           )
 
           print("Final shape:", voice.shape)
+
           print("Final dtype:", voice.dtype)
 
           voice.tofile(output)
 
-          print()
-          print("Created:")
-          print(output)
+          print("Created:", output)
 
           print(
               "Size:",
               os.path.getsize(output),
               "bytes"
           )
+
           PY
 
           test -s "$VOICE_OUTPUT"
@@ -235,22 +250,25 @@ jobs:
           ls -lh "$VOICE_OUTPUT"
 
 
-      # ============================================================
-      # CREATE TEMPORARY RUST JNI PROJECT
-      # ============================================================
+      # ---------------------------------------------------------
+      # CREATE RUST JNI PROJECT
+      # ---------------------------------------------------------
 
       - name: Create native Rust project
         run: |
+
           mkdir -p "$RUNNER_TEMP/kokoro-native/src"
 
 
-      # ============================================================
-      # CREATE NATIVE CARGO.TOML
-      # ============================================================
+      # ---------------------------------------------------------
+      # RUST CARGO.TOML
+      # ---------------------------------------------------------
 
-      - name: Create native Cargo.toml
+      - name: Create Rust Cargo.toml
         run: |
+
           cat > "$RUNNER_TEMP/kokoro-native/Cargo.toml" <<'EOF'
+
           [package]
           name = "kokoro_jni"
           version = "1.0.0"
@@ -261,6 +279,7 @@ jobs:
           crate-type = ["cdylib"]
 
           [dependencies]
+
           jni = "0.21.1"
 
           kokoro-en = "=0.1.5"
@@ -276,74 +295,123 @@ jobs:
           }
 
           [profile.release]
+
           opt-level = 3
+
           lto = "thin"
+
           codegen-units = 1
+
           panic = "abort"
+
           strip = true
+
           EOF
 
 
-      # ============================================================
-      # CREATE JNI BRIDGE
-      # ============================================================
+      # ---------------------------------------------------------
+      # RUST JNI SOURCE
+      # ---------------------------------------------------------
 
-      - name: Create native JNI bridge
+      - name: Create Rust JNI source
         run: |
+
           cat > "$RUNNER_TEMP/kokoro-native/src/lib.rs" <<'EOF'
+
           use jni::objects::{JClass, JString};
-          use jni::sys::{jbyteArray, jfloat, jstring};
+
+          use jni::sys::{
+              jbyteArray,
+              jfloat,
+              jstring
+          };
+
           use jni::JNIEnv;
 
-          use kokoro_en::{KokoroTts, Voice};
+          use kokoro_en::{
+              KokoroTts,
+              Voice
+          };
 
           use std::path::Path;
-          use std::sync::{Mutex, OnceLock};
 
-          use tokio::runtime::{Builder, Runtime};
+          use std::sync::{
+              Mutex,
+              OnceLock
+          };
+
+          use tokio::runtime::{
+              Builder,
+              Runtime
+          };
 
 
-          static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+          static RUNTIME: OnceLock<Runtime> =
+              OnceLock::new();
 
-          static ENGINE: OnceLock<Mutex<Option<KokoroTts>>> = OnceLock::new();
+
+          static ENGINE: OnceLock<
+              Mutex<Option<KokoroTts>>
+          > = OnceLock::new();
 
 
           fn runtime() -> &'static Runtime {
+
               RUNTIME.get_or_init(|| {
+
                   Builder::new_multi_thread()
+
                       .worker_threads(2)
+
                       .enable_all()
+
                       .build()
-                      .expect("Failed to create Tokio runtime")
+
+                      .expect(
+                          "Failed to create Tokio runtime"
+                      )
               })
           }
 
 
-          fn engine() -> &'static Mutex<Option<KokoroTts>> {
-              ENGINE.get_or_init(|| Mutex::new(None))
+          fn engine() ->
+              &'static Mutex<Option<KokoroTts>>
+          {
+
+              ENGINE.get_or_init(|| {
+                  Mutex::new(None)
+              })
           }
 
 
           fn make_error(
               env: &mut JNIEnv,
-              message: String,
+              message: String
           ) -> jstring {
+
               env.new_string(message)
-                  .map(|value| value.into_raw())
-                  .unwrap_or(std::ptr::null_mut())
+
+                  .map(|value| {
+                      value.into_raw()
+                  })
+
+                  .unwrap_or(
+                      std::ptr::null_mut()
+                  )
           }
 
 
-          // ========================================================
-          // INITIALIZE KOKORO
-          // ========================================================
-
           #[unsafe(no_mangle)]
           pub extern "system" fn Java_com_vishala_kokoromichael_KokoroEngine_nativeInit(
+
               mut env: JNIEnv,
+
               _class: JClass,
+
               model_path: JString,
-              voice_path: JString,
+
+              voice_path: JString
+
           ) -> jstring {
 
               let model_path: String =
@@ -352,12 +420,13 @@ jobs:
                       Ok(value) => value.into(),
 
                       Err(error) => {
+
                           return make_error(
                               &mut env,
                               format!(
                                   "Cannot read model path: {}",
                                   error
-                              ),
+                              )
                           );
                       }
                   };
@@ -369,12 +438,13 @@ jobs:
                       Ok(value) => value.into(),
 
                       Err(error) => {
+
                           return make_error(
                               &mut env,
                               format!(
                                   "Cannot read voice path: {}",
                                   error
-                              ),
+                              )
                           );
                       }
                   };
@@ -385,7 +455,7 @@ jobs:
 
                       KokoroTts::new(
                           Path::new(&model_path),
-                          Path::new(&voice_path),
+                          Path::new(&voice_path)
                       ).await
 
                   });
@@ -395,14 +465,12 @@ jobs:
 
                   Ok(tts) => {
 
-                      let lock =
-                          engine().lock();
-
-                      match lock {
+                      match engine().lock() {
 
                           Ok(mut guard) => {
 
-                              *guard = Some(tts);
+                              *guard =
+                                  Some(tts);
 
                               std::ptr::null_mut()
                           }
@@ -414,11 +482,12 @@ jobs:
                                   format!(
                                       "Engine lock failed: {}",
                                       error
-                                  ),
+                                  )
                               )
                           }
                       }
                   }
+
 
                   Err(error) => {
 
@@ -427,23 +496,24 @@ jobs:
                           format!(
                               "Kokoro initialization failed: {}",
                               error
-                          ),
+                          )
                       )
                   }
               }
           }
 
 
-          // ========================================================
-          // SYNTHESIZE
-          // ========================================================
-
           #[unsafe(no_mangle)]
           pub extern "system" fn Java_com_vishala_kokoromichael_KokoroEngine_nativeSynthesize(
+
               mut env: JNIEnv,
+
               _class: JClass,
+
               text: JString,
-              speed: jfloat,
+
+              speed: jfloat
+
           ) -> jbyteArray {
 
               let text: String =
@@ -459,7 +529,7 @@ jobs:
                                   format!(
                                       "Cannot read text: {}",
                                       error
-                                  ),
+                                  )
                               );
 
                           return std::ptr::null_mut();
@@ -468,16 +538,18 @@ jobs:
 
 
               let speed =
-                  (speed as f32).clamp(
-                      0.5,
-                      2.0,
-                  );
+                  (speed as f32)
+                      .clamp(
+                          0.5,
+                          2.0
+                      );
 
 
               let result = {
 
                   let lock =
                       engine().lock();
+
 
                   match lock {
 
@@ -488,17 +560,21 @@ jobs:
                               Some(tts) => {
 
                                   runtime().block_on(
+
                                       tts.synth(
+
                                           &text,
+
                                           Voice::new(
                                               "am_michael"
                                           )
-                                          .with_speed(
-                                              speed
-                                          ),
+                                          .with_speed(speed)
+
                                       )
+
                                   )
                               }
+
 
                               None => {
 
@@ -513,6 +589,7 @@ jobs:
                           }
                       }
 
+
                       Err(error) => {
 
                           let _ =
@@ -521,7 +598,7 @@ jobs:
                                   format!(
                                       "Engine lock failed: {}",
                                       error
-                                  ),
+                                  )
                               );
 
                           return std::ptr::null_mut();
@@ -543,24 +620,13 @@ jobs:
                                   format!(
                                       "Kokoro synthesis failed: {}",
                                       error
-                                  ),
+                                  )
                               );
 
                           return std::ptr::null_mut();
                       }
                   };
 
-
-              /*
-               * Kokoro output:
-               *
-               * mono
-               * float32
-               * 24,000 Hz
-               *
-               * Convert float32 [-1,1]
-               * to signed 16-bit PCM.
-               */
 
               let mut pcm =
                   Vec::<u8>::with_capacity(
@@ -576,25 +642,16 @@ jobs:
                           1.0
                       );
 
+
                   let value =
-                      (sample * 32767.0)
-                          as i16;
+                      (sample * 32767.0) as i16;
+
 
                   pcm.extend_from_slice(
                       &value.to_le_bytes()
                   );
               }
 
-
-              /*
-               * jni 0.21 returns a JPrimitiveArray wrapper.
-               *
-               * JNI requires the raw jbyteArray.
-               *
-               * Therefore:
-               *
-               * array.into_raw()
-               */
 
               match env.byte_array_from_slice(
                   &pcm
@@ -605,6 +662,7 @@ jobs:
                       array.into_raw()
                   }
 
+
                   Err(error) => {
 
                       let _ =
@@ -613,7 +671,7 @@ jobs:
                               format!(
                                   "Cannot create PCM byte array: {}",
                                   error
-                              ),
+                              )
                           );
 
                       std::ptr::null_mut()
@@ -622,34 +680,37 @@ jobs:
           }
 
 
-          // ========================================================
-          // RELEASE
-          // ========================================================
-
           #[unsafe(no_mangle)]
           pub extern "system" fn Java_com_vishala_kokoromichael_KokoroEngine_nativeRelease(
+
               _env: JNIEnv,
-              _class: JClass,
+
+              _class: JClass
+
           ) {
 
               if let Ok(mut guard) =
                   engine().lock()
               {
+
                   *guard = None;
               }
           }
+
           EOF
 
 
-      # ============================================================
-      # BUILD NATIVE KOKORO
-      # ============================================================
+      # ---------------------------------------------------------
+      # BUILD RUST JNI LIBRARY
+      # ---------------------------------------------------------
 
-      - name: Build native Kokoro JNI library
+      - name: Build native Kokoro library
         working-directory: ${{ runner.temp }}/kokoro-native
         env:
           KOKORO_ORT_PROVIDER: cpu
+
         run: |
+
           cargo ndk \
             -t arm64-v8a \
             --platform 29 \
@@ -658,13 +719,12 @@ jobs:
             --release
 
 
-      # ============================================================
-      # CHECK NATIVE LIBRARY
-      # ============================================================
+      # ---------------------------------------------------------
+      # VERIFY KOKORO JNI
+      # ---------------------------------------------------------
 
-      - name: Verify native library
+      - name: Verify Kokoro native library
         run: |
-          set -e
 
           test -f \
             app/src/main/jniLibs/arm64-v8a/libkokoro_jni.so
@@ -676,64 +736,107 @@ jobs:
             app/src/main/jniLibs/arm64-v8a/libkokoro_jni.so
 
 
-      # ============================================================
-      # COPY MODEL INTO APK ASSETS
-      # ============================================================
+      # ---------------------------------------------------------
+      # IMPORTANT:
+      # ADD ANDROID C++ RUNTIME
+      # ---------------------------------------------------------
 
-      - name: Prepare embedded Kokoro assets
+      - name: Add libc++ shared runtime
         run: |
-          set -e
+
+          mkdir -p \
+            app/src/main/jniLibs/arm64-v8a
+
+
+          cp \
+            "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" \
+            "app/src/main/jniLibs/arm64-v8a/libc++_shared.so"
+
+
+          test -f \
+            app/src/main/jniLibs/arm64-v8a/libc++_shared.so
+
+
+          echo "========================================"
+
+          echo "Native libraries:"
+
+          echo "========================================"
+
+          ls -lh \
+            app/src/main/jniLibs/arm64-v8a/
+
+
+      # ---------------------------------------------------------
+      # KOKORO ASSETS
+      # ---------------------------------------------------------
+
+      - name: Add Kokoro assets to APK
+        run: |
 
           mkdir -p \
             app/src/main/assets/kokoro
 
+
           cp \
             "$RUNNER_TEMP/kokoro-assets/${MODEL_NAME}" \
-            app/src/main/assets/kokoro/kokoro-v1.0.int8.onnx
+            "app/src/main/assets/kokoro/kokoro-v1.0.int8.onnx"
+
 
           cp \
             "$RUNNER_TEMP/kokoro-voice/am_michael.bin" \
-            app/src/main/assets/kokoro/am_michael.bin
+            "app/src/main/assets/kokoro/am_michael.bin"
 
-          echo "Embedded assets:"
+
+          echo "========================================"
+
+          echo "Kokoro assets:"
+
+          echo "========================================"
 
           ls -lh \
-            app/src/main/assets/kokoro
+            app/src/main/assets/kokoro/
 
 
-      # ============================================================
-      # SET UP GRADLE
-      # ============================================================
+      # ---------------------------------------------------------
+      # GRADLE
+      # ---------------------------------------------------------
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
+
         with:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
 
-      # ============================================================
+      # ---------------------------------------------------------
       # BUILD APK
-      # ============================================================
+      # ---------------------------------------------------------
 
       - name: Build release APK
         env:
           KOKORO_ORT_PROVIDER: cpu
+
         run: |
+
           gradle \
             --no-daemon \
             --stacktrace \
             assembleRelease
 
 
-      # ============================================================
+      # ---------------------------------------------------------
       # VERIFY APK
-      # ============================================================
+      # ---------------------------------------------------------
 
-      - name: Find APK
+      - name: Verify APK
         run: |
-          set -e
 
-          echo "APK files:"
+          echo "========================================"
+
+          echo "APK FILES"
+
+          echo "========================================"
 
           find \
             app/build/outputs/apk \
@@ -741,20 +844,31 @@ jobs:
             -name "*.apk" \
             -print
 
-          echo
+
+          echo "========================================"
+
+          echo "APK DIRECTORY"
+
+          echo "========================================"
 
           ls -lh \
             app/build/outputs/apk/release/
 
 
-      # ============================================================
+      # ---------------------------------------------------------
       # UPLOAD APK
-      # ============================================================
+      # ---------------------------------------------------------
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
+
         with:
+
           name: Kokoro-TTS-Michael-Offline
-          path: app/build/outputs/apk/release/*.apk
+
+          path:
+            app/build/outputs/apk/release/*.apk
+
           if-no-files-found: error
+
           retention-days: 30
