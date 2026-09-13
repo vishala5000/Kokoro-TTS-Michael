@@ -8,7 +8,6 @@ import android.provider.MediaStore
 
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.RandomAccessFile
 
 
@@ -18,14 +17,11 @@ class WavWriter(
 
     companion object {
 
-        private const val SAMPLE_RATE =
-            24000
+        private const val SAMPLE_RATE = 24000L
 
-        private const val CHANNELS =
-            1
+        private const val CHANNELS = 1L
 
-        private const val BITS_PER_SAMPLE =
-            16
+        private const val BITS_PER_SAMPLE = 16L
     }
 
 
@@ -44,8 +40,7 @@ class WavWriter(
         )
 
 
-    private var dataSize =
-        0L
+    private var dataSize = 0L
 
 
     init {
@@ -247,13 +242,13 @@ class WavWriter(
             SAMPLE_RATE *
                     CHANNELS *
                     BITS_PER_SAMPLE /
-                    8
+                    8L
 
 
         val blockAlign =
             CHANNELS *
                     BITS_PER_SAMPLE /
-                    8
+                    8L
 
 
         val riffChunkSize =
@@ -263,53 +258,64 @@ class WavWriter(
 
         file.writeBytes("RIFF")
 
+
         writeIntLE(
             file,
             riffChunkSize
         )
+
 
         file.writeBytes("WAVE")
 
 
         file.writeBytes("fmt ")
 
+
         writeIntLE(
             file,
-            16
+            16L
         )
 
+
+        // PCM format
         writeShortLE(
             file,
             1
         )
 
+
         writeShortLE(
             file,
-            CHANNELS
+            CHANNELS.toInt()
         )
+
 
         writeIntLE(
             file,
             SAMPLE_RATE
         )
 
+
         writeIntLE(
             file,
             byteRate
         )
 
-        writeShortLE(
-            file,
-            blockAlign
-        )
 
         writeShortLE(
             file,
-            BITS_PER_SAMPLE
+            blockAlign.toInt()
+        )
+
+
+        writeShortLE(
+            file,
+            BITS_PER_SAMPLE.toInt()
         )
 
 
         file.writeBytes("data")
+
 
         writeIntLE(
             file,
@@ -324,19 +330,22 @@ class WavWriter(
     ) {
 
         file.write(
-            (value and 0xFF).toInt()
+            (value and 0xFFL).toInt()
         )
 
-        file.write(
-            ((value shr 8) and 0xFF).toInt()
-        )
 
         file.write(
-            ((value shr 16) and 0xFF).toInt()
+            ((value shr 8) and 0xFFL).toInt()
         )
 
+
         file.write(
-            ((value shr 24) and 0xFF).toInt()
+            ((value shr 16) and 0xFFL).toInt()
+        )
+
+
+        file.write(
+            ((value shr 24) and 0xFFL).toInt()
         )
     }
 
@@ -349,6 +358,7 @@ class WavWriter(
         file.write(
             value and 0xFF
         )
+
 
         file.write(
             (value shr 8) and 0xFF
