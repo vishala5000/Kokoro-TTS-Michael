@@ -1,16 +1,15 @@
 package com.vishala.kokoromichael
 
+import android.app.Activity
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
-
-import android.app.Activity
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,6 +31,7 @@ class MainActivity : Activity() {
 
     private lateinit var startButton: Button
     private lateinit var stopButton: Button
+    private lateinit var saveWavButton: Button
 
     private lateinit var progressBar: ProgressBar
     private lateinit var progressText: TextView
@@ -50,6 +50,8 @@ class MainActivity : Activity() {
 
     @Volatile
     private var stopRequested = false
+
+    private var lastSavedUri: Uri? = null
 
 
     override fun onCreate(
@@ -85,6 +87,11 @@ class MainActivity : Activity() {
         stopButton =
             findViewById(
                 R.id.stopButton
+            )
+
+        saveWavButton =
+            findViewById(
+                R.id.saveWavButton
             )
 
         progressBar =
@@ -183,6 +190,11 @@ class MainActivity : Activity() {
         stopButton.setOnClickListener {
             stopGeneration()
         }
+
+
+        saveWavButton.setOnClickListener {
+            saveWav()
+        }
     }
 
 
@@ -212,6 +224,8 @@ class MainActivity : Activity() {
         startButton.isEnabled = true
 
         stopButton.isEnabled = false
+
+        saveWavButton.isEnabled = false
 
         progressBar.progress = 0
 
@@ -264,6 +278,10 @@ class MainActivity : Activity() {
 
 
         stopRequested = false
+
+        lastSavedUri = null
+
+        saveWavButton.isEnabled = false
 
         startButton.isEnabled = false
 
@@ -330,6 +348,55 @@ class MainActivity : Activity() {
     }
 
 
+    private fun saveWav() {
+
+        val uri =
+            lastSavedUri
+
+
+        if (uri == null) {
+
+            Toast.makeText(
+                this,
+                "Generate audio first.",
+                Toast.LENGTH_SHORT
+            ).show()
+
+            return
+        }
+
+
+        try {
+
+            val intent =
+                Intent(
+                    Intent.ACTION_VIEW
+                ).apply {
+
+                    setDataAndType(
+                        uri,
+                        "audio/wav"
+                    )
+
+                    addFlags(
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+
+
+            startActivity(intent)
+
+        } catch (_: Throwable) {
+
+            Toast.makeText(
+                this,
+                "WAV is already saved in Music/audio.wav",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+
     private suspend fun generate(
         text: String,
         speed: Float
@@ -379,6 +446,7 @@ class MainActivity : Activity() {
 
 
         if (chunks.isEmpty()) {
+
             throw IllegalArgumentException(
                 "No usable text"
             )
@@ -472,6 +540,10 @@ class MainActivity : Activity() {
                 }
 
 
+            lastSavedUri =
+                outputUri
+
+
             withContext(
                 Dispatchers.Main
             ) {
@@ -479,6 +551,8 @@ class MainActivity : Activity() {
                 progressBar.progress = 100
 
                 progressText.text = "100%"
+
+                saveWavButton.isEnabled = true
 
 
                 if (stopRequested) {
