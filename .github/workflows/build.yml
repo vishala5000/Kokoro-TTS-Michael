@@ -8,8 +8,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
+
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -17,16 +19,16 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-        with:
-          gradle-version: "8.13"
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+
       - name: Install Android SDK components
+        shell: bash
         run: |
+          set -e
+
           yes | sdkmanager --licenses >/dev/null || true
 
           sdkmanager \
@@ -35,41 +37,87 @@ jobs:
             "build-tools;35.0.0" \
             "ndk;27.3.13750724"
 
+          echo ""
+          echo "========================================"
+          echo "ANDROID SDK"
+          echo "========================================"
+
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+
+          ls -la "$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "8.13"
+
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
 
+
       - name: Install cargo-ndk
+        shell: bash
         run: |
+          set -e
+
           cargo install cargo-ndk --locked
+
+          cargo ndk --version
+
 
       - name: Download official Kokoro model and Michael voice
         shell: bash
         run: |
           set -e
 
-          mkdir -p "$RUNNER_TEMP/kokoro"
+          KOKORO_DIR="$RUNNER_TEMP/kokoro"
+
+          rm -rf "$KOKORO_DIR"
+          mkdir -p "$KOKORO_DIR"
 
           MODEL_URL="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/onnx/model_quantized.onnx?download=true"
+
           VOICE_URL="https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/voices/am_michael.bin?download=true"
 
-          echo "Downloading official Kokoro INT8 model..."
-          curl -L --fail --retry 3 \
+          echo "========================================"
+          echo "DOWNLOADING KOKORO MODEL"
+          echo "========================================"
+
+          curl \
+            -L \
+            --fail \
+            --retry 3 \
+            --retry-delay 2 \
             "$MODEL_URL" \
-            -o "$RUNNER_TEMP/kokoro/kokoro.onnx"
-
-          echo "Downloading official Michael voice..."
-          curl -L --fail --retry 3 \
-            "$VOICE_URL" \
-            -o "$RUNNER_TEMP/kokoro/am_michael.bin"
-
-          test -s "$RUNNER_TEMP/kokoro/kokoro.onnx"
-          test -s "$RUNNER_TEMP/kokoro/am_michael.bin"
+            -o "$KOKORO_DIR/kokoro.onnx"
 
           echo ""
-          echo "Downloaded files:"
-          ls -lh "$RUNNER_TEMP/kokoro"
+          echo "========================================"
+          echo "DOWNLOADING MICHAEL VOICE"
+          echo "========================================"
+
+          curl \
+            -L \
+            --fail \
+            --retry 3 \
+            --retry-delay 2 \
+            "$VOICE_URL" \
+            -o "$KOKORO_DIR/am_michael.bin"
+
+          test -s "$KOKORO_DIR/kokoro.onnx"
+          test -s "$KOKORO_DIR/am_michael.bin"
+
+          echo ""
+          echo "========================================"
+          echo "DOWNLOADED KOKORO FILES"
+          echo "========================================"
+
+          ls -lh "$KOKORO_DIR"
+
 
       - name: Create Rust JNI project
         shell: bash
@@ -79,7 +127,13 @@ jobs:
           RUST_DIR="$RUNNER_TEMP/kokoro-rust"
 
           rm -rf "$RUST_DIR"
+
           mkdir -p "$RUST_DIR/src"
+
+          echo "========================================"
+          echo "CREATING RUST PROJECT"
+          echo "========================================"
+
 
           cat > "$RUST_DIR/Cargo.toml" <<'EOF'
           [package]
@@ -96,10 +150,12 @@ jobs:
           kokoro-en = "=0.1.5"
           EOF
 
+
           cat > "$RUST_DIR/kokoro-g2p.tab" <<'EOF'
           youtube	jˈuːtuːb
           youtube.com	jˈuːtuːb dˈɑt kˈɑm
           EOF
+
 
           cat > "$RUST_DIR/src/lib.rs" <<'EOF'
           use std::sync::Mutex;
@@ -110,7 +166,10 @@ jobs:
 
           use kokoro_en::{KokoroTts, Voice};
 
-          static ENGINE: Mutex<Option<KokoroTts>> = Mutex::new(None);
+
+          static ENGINE: Mutex<Option<KokoroTts>> =
+              Mutex::new(None);
+
 
           #[unsafe(no_mangle)]
           pub extern "system" fn Java_com_vishala_kokoromichael_KokoroEngine_nativeInit(
@@ -119,23 +178,33 @@ jobs:
               model_path: JString,
               voice_path: JString,
           ) -> jint {
-              let model_path: String = match env.get_string(&model_path) {
-                  Ok(value) => value.into(),
-                  Err(_) => return 1,
-              };
 
-              let voice_path: String = match env.get_string(&voice_path) {
-                  Ok(value) => value.into(),
-                  Err(_) => return 2,
-              };
+              let model_path: String =
+                  match env.get_string(&model_path) {
+                      Ok(value) => value.into(),
+                      Err(_) => return 1,
+                  };
+
+
+              let voice_path: String =
+                  match env.get_string(&voice_path) {
+                      Ok(value) => value.into(),
+                      Err(_) => return 2,
+                  };
+
 
               let lexicon_path =
                   std::path::Path::new(&model_path)
                       .parent()
-                      .map(|dir| dir.join("kokoro-g2p.tab"));
+                      .map(|dir| {
+                          dir.join("kokoro-g2p.tab")
+                      });
+
 
               if let Some(path) = lexicon_path {
+
                   if path.exists() {
+
                       unsafe {
                           std::env::set_var(
                               "KOKORO_G2P_LEXICON",
@@ -144,6 +213,7 @@ jobs:
                       }
                   }
               }
+
 
               let runtime =
                   match tokio::runtime::Builder::new_current_thread()
@@ -154,25 +224,37 @@ jobs:
                       Err(_) => return 3,
                   };
 
-              let result = runtime.block_on(async {
-                  KokoroTts::new(&model_path, &voice_path).await
-              });
+
+              let result =
+                  runtime.block_on(async {
+                      KokoroTts::new(
+                          &model_path,
+                          &voice_path
+                      ).await
+                  });
+
 
               match result {
+
                   Ok(tts) => {
+
                       let mut engine =
                           match ENGINE.lock() {
                               Ok(value) => value,
                               Err(_) => return 4,
                           };
 
+
                       *engine = Some(tts);
+
                       0
                   }
+
 
                   Err(_) => 5,
               }
           }
+
 
           #[unsafe(no_mangle)]
           pub extern "system" fn Java_com_vishala_kokoromichael_KokoroEngine_nativeSynthesize(
@@ -181,91 +263,194 @@ jobs:
               text: JString,
               speed: jfloat,
           ) -> jbyteArray {
-              let text: String = match env.get_string(&text) {
-                  Ok(value) => value.into(),
-                  Err(_) => return std::ptr::null_mut(),
-              };
+
+              let text: String =
+                  match env.get_string(&text) {
+
+                      Ok(value) => value.into(),
+
+                      Err(_) => {
+                          return std::ptr::null_mut();
+                      }
+                  };
+
 
               if text.trim().is_empty() {
                   return std::ptr::null_mut();
               }
 
-              let speed = speed.clamp(0.5, 2.0);
+
+              let speed =
+                  speed.clamp(
+                      0.5,
+                      2.0
+                  );
+
 
               let mut engine =
                   match ENGINE.lock() {
+
                       Ok(value) => value,
-                      Err(_) => return std::ptr::null_mut(),
+
+                      Err(_) => {
+                          return std::ptr::null_mut();
+                      }
                   };
 
-              let tts = match engine.as_mut() {
-                  Some(value) => value,
-                  None => return std::ptr::null_mut(),
-              };
+
+              let tts =
+                  match engine.as_mut() {
+
+                      Some(value) => value,
+
+                      None => {
+                          return std::ptr::null_mut();
+                      }
+                  };
+
 
               let runtime =
                   match tokio::runtime::Builder::new_current_thread()
                       .enable_all()
                       .build()
                   {
+
                       Ok(value) => value,
-                      Err(_) => return std::ptr::null_mut(),
+
+                      Err(_) => {
+                          return std::ptr::null_mut();
+                      }
                   };
 
-              let result = runtime.block_on(async {
-                  let voice = Voice::new("am_michael").with_speed(speed);
-                  tts.synth(&text, voice).await
-              });
 
-              let (audio, _duration) = match result {
-                  Ok(value) => value,
-                  Err(_) => return std::ptr::null_mut(),
-              };
+              let result =
+                  runtime.block_on(async {
 
-              let mut pcm = Vec::<u8>::with_capacity(audio.len() * 2);
+                      let voice =
+                          Voice::new("am_michael")
+                              .with_speed(speed);
+
+
+                      tts.synth(
+                          &text,
+                          voice
+                      ).await
+                  });
+
+
+              let (audio, _duration) =
+                  match result {
+
+                      Ok(value) => value,
+
+                      Err(_) => {
+                          return std::ptr::null_mut();
+                      }
+                  };
+
+
+              let mut pcm =
+                  Vec::<u8>::with_capacity(
+                      audio.len() * 2
+                  );
+
 
               for sample in audio {
-                  let sample = sample.clamp(-1.0, 1.0);
 
-                  let value: i16 = if sample >= 0.0 {
-                      (sample * 32767.0) as i16
-                  } else {
-                      (sample * 32768.0) as i16
-                  };
+                  let sample =
+                      sample.clamp(
+                          -1.0,
+                          1.0
+                      );
 
-                  pcm.extend_from_slice(&value.to_le_bytes());
+
+                  let value: i16 =
+                      if sample >= 0.0 {
+
+                          (sample * 32767.0)
+                              as i16
+
+                      } else {
+
+                          (sample * 32768.0)
+                              as i16
+                      };
+
+
+                  pcm.extend_from_slice(
+                      &value.to_le_bytes()
+                  );
               }
+
 
               match env.byte_array_from_slice(&pcm) {
-                  Ok(array) => array.into_raw(),
-                  Err(_) => std::ptr::null_mut(),
+
+                  Ok(array) => {
+                      array.into_raw()
+                  }
+
+                  Err(_) => {
+                      std::ptr::null_mut()
+                  }
               }
           }
+
 
           #[unsafe(no_mangle)]
           pub extern "system" fn Java_com_vishala_kokoromichael_KokoroEngine_nativeRelease(
               _env: JNIEnv,
               _class: JClass,
           ) {
-              if let Ok(mut engine) = ENGINE.lock() {
+
+              if let Ok(mut engine) =
+                  ENGINE.lock()
+              {
                   *engine = None;
               }
           }
           EOF
 
-          echo "Rust JNI project created:"
-          find "$RUST_DIR" -maxdepth 2 -type f -print
+
+          echo ""
+          echo "========================================"
+          echo "RUST PROJECT CREATED"
+          echo "========================================"
+
+          find "$RUST_DIR" \
+            -maxdepth 3 \
+            -type f \
+            -print
+
 
       - name: Build Rust JNI library
         shell: bash
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: |
           set -e
 
           RUST_DIR="$RUNNER_TEMP/kokoro-rust"
 
+          export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+
+          echo "========================================"
+          echo "ANDROID NDK"
+          echo "========================================"
+
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+
+          test -d "$ANDROID_NDK_ROOT"
+
+          echo ""
+          echo "NDK directory exists."
+
           cd "$RUST_DIR"
+
+          echo ""
+          echo "========================================"
+          echo "BUILDING RUST JNI"
+          echo "========================================"
 
           cargo ndk \
             -t arm64-v8a \
@@ -274,30 +459,41 @@ jobs:
             build --release
 
           echo ""
-          echo "Rust JNI build completed."
+          echo "========================================"
+          echo "RUST JNI BUILD COMPLETED"
+          echo "========================================"
 
           find "$GITHUB_WORKSPACE/app/src/main/jniLibs" \
-            -type f \
             -maxdepth 4 \
+            -type f \
             -print
+
 
       - name: Copy Android libc++ shared library
         shell: bash
         run: |
           set -e
 
-          NDK="$ANDROID_NDK_HOME"
+          NDK="$ANDROID_NDK_ROOT"
 
           LIBCXX="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
 
+          echo "========================================"
+          echo "CHECKING libc++_shared.so"
+          echo "========================================"
+
           test -f "$LIBCXX"
 
-          mkdir -p "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
+          mkdir -p \
+            "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
 
-          cp "$LIBCXX" \
+          cp \
+            "$LIBCXX" \
             "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libc++_shared.so"
 
-          echo "libc++_shared.so copied."
+          ls -lh \
+            "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libc++_shared.so"
+
 
       - name: Bundle Kokoro model, Michael voice and G2P lexicon
         shell: bash
@@ -308,14 +504,21 @@ jobs:
 
           mkdir -p "$ASSET_DIR"
 
-          cp "$RUNNER_TEMP/kokoro/kokoro.onnx" \
+
+          cp \
+            "$RUNNER_TEMP/kokoro/kokoro.onnx" \
             "$ASSET_DIR/kokoro.onnx"
 
-          cp "$RUNNER_TEMP/kokoro/am_michael.bin" \
+
+          cp \
+            "$RUNNER_TEMP/kokoro/am_michael.bin" \
             "$ASSET_DIR/am_michael.bin"
 
-          cp "$RUNNER_TEMP/kokoro-rust/kokoro-g2p.tab" \
+
+          cp \
+            "$RUNNER_TEMP/kokoro-rust/kokoro-g2p.tab" \
             "$ASSET_DIR/kokoro-g2p.tab"
+
 
           echo "========================================"
           echo "KOKORO ASSETS"
@@ -323,69 +526,139 @@ jobs:
 
           ls -lh "$ASSET_DIR"
 
-          test -s "$ASSET_DIR/kokoro.onnx"
-          test -s "$ASSET_DIR/am_michael.bin"
-          test -s "$ASSET_DIR/kokoro-g2p.tab"
+
+          test -s \
+            "$ASSET_DIR/kokoro.onnx"
+
+
+          test -s \
+            "$ASSET_DIR/am_michael.bin"
+
+
+          test -s \
+            "$ASSET_DIR/kokoro-g2p.tab"
+
 
           echo ""
           echo "Model:"
-          ls -lh "$ASSET_DIR/kokoro.onnx"
+          ls -lh \
+            "$ASSET_DIR/kokoro.onnx"
+
 
           echo ""
           echo "Michael voice:"
-          ls -lh "$ASSET_DIR/am_michael.bin"
+          ls -lh \
+            "$ASSET_DIR/am_michael.bin"
+
 
           echo ""
           echo "G2P lexicon:"
-          cat "$ASSET_DIR/kokoro-g2p.tab"
+          cat \
+            "$ASSET_DIR/kokoro-g2p.tab"
+
 
           echo ""
           echo "All Kokoro assets bundled successfully."
 
-      - name: Verify Android project
+
+      - name: Verify native libraries and assets
         shell: bash
         run: |
           set -e
 
           echo "========================================"
-          echo "ANDROID PROJECT"
+          echo "VERIFYING NATIVE LIBRARY"
           echo "========================================"
 
-          find app/src/main -maxdepth 5 -type f | sort
+          test -f \
+            "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libkokoro_jni.so"
+
+          test -f \
+            "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a/libc++_shared.so"
+
+          echo ""
+          echo "========================================"
+          echo "VERIFYING KOKORO ASSETS"
+          echo "========================================"
+
+          test -s \
+            "$GITHUB_WORKSPACE/app/src/main/assets/kokoro/kokoro.onnx"
+
+          test -s \
+            "$GITHUB_WORKSPACE/app/src/main/assets/kokoro/am_michael.bin"
+
+          test -s \
+            "$GITHUB_WORKSPACE/app/src/main/assets/kokoro/kokoro-g2p.tab"
+
+          echo ""
+          echo "Native libraries:"
+          ls -lh \
+            "$GITHUB_WORKSPACE/app/src/main/jniLibs/arm64-v8a"
+
+          echo ""
+          echo "Kokoro assets:"
+          ls -lh \
+            "$GITHUB_WORKSPACE/app/src/main/assets/kokoro"
+
 
       - name: Build release APK
         shell: bash
         run: |
           set -e
 
+          echo "========================================"
+          echo "BUILDING RELEASE APK"
+          echo "========================================"
+
           gradle \
             --no-daemon \
             --stacktrace \
             assembleRelease
 
-      - name: Find APK
+
+      - name: Find and prepare APK
         shell: bash
         run: |
           set -e
 
-          mkdir -p "$GITHUB_WORKSPACE/output"
+          mkdir -p \
+            "$GITHUB_WORKSPACE/output"
 
-          APK="$(find "$GITHUB_WORKSPACE/app/build/outputs/apk/release" \
-            -type f \
-            -name "*.apk" \
-            | head -n 1)"
 
-          test -n "$APK"
-          test -f "$APK"
+          APK="$(
+            find \
+              "$GITHUB_WORKSPACE/app/build/outputs/apk/release" \
+              -type f \
+              -name "*.apk" \
+              | head -n 1
+          )"
 
-          cp "$APK" \
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not found."
+            exit 1
+          fi
+
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK file does not exist."
+            exit 1
+          fi
+
+
+          cp \
+            "$APK" \
             "$GITHUB_WORKSPACE/output/Kokoro-TTS-Michael.apk"
 
+
+          echo ""
           echo "========================================"
           echo "FINAL APK"
           echo "========================================"
 
-          ls -lh "$GITHUB_WORKSPACE/output/Kokoro-TTS-Michael.apk"
+          ls -lh \
+            "$GITHUB_WORKSPACE/output/Kokoro-TTS-Michael.apk"
+
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
